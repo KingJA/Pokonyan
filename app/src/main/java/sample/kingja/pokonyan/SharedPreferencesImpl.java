@@ -116,6 +116,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
     @UnsupportedAppUsage
     SharedPreferencesImpl(File file, int mode) {
         mFile = file;
+        //创建备份文件
         mBackupFile = makeBackupFile(file);
         mMode = mode;
         mLoaded = false;
@@ -139,9 +140,11 @@ final class SharedPreferencesImpl implements SharedPreferences {
 
     private void loadFromDisk() {
         synchronized (mLock) {
+            //如果已经加载好了就跳出
             if (mLoaded) {
                 return;
             }
+            //备份文件存在则删除源文件，备份文件重命名为源文件
             if (mBackupFile.exists()) {
                 mFile.delete();
                 mBackupFile.renameTo(mFile);
@@ -163,6 +166,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
                 try {
                     str = new BufferedInputStream(
                             new FileInputStream(mFile), 16 * 1024);
+                    //把sp的xml文件解析到map
                     map = (Map<String, Object>) XmlUtils.readMapXml(str);
                 } catch (Exception e) {
                     Log.w(TAG, "Cannot read " + mFile.getAbsolutePath(), e);
@@ -178,6 +182,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
         }
 
         synchronized (mLock) {
+            //标示设为已经加载
             mLoaded = true;
             mThrowable = thrown;
 
@@ -363,6 +368,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
         //
         // ... all without blocking.
         synchronized (mLock) {
+        //  如果执行 edit() 时如果 SharedPreferencesImpl 没有加载完成，就会阻塞
             awaitLoadedLocked();
         }
 
@@ -584,6 +590,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
 
                         changesMade = true;
                         if (hasListeners) {
+                            //被修改的键池
                             keysModified.add(k);
                         }
                     }
@@ -668,6 +675,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
      */
     private void enqueueDiskWrite(final MemoryCommitResult mcr,
                                   final Runnable postWriteRunnable) {
+        //没有runnable则进行同步操作
         final boolean isFromSyncCommit = (postWriteRunnable == null);
 
         final Runnable writeToDiskRunnable = new Runnable() {
@@ -680,6 +688,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
                     mDiskWritesInFlight--;
                 }
                 if (postWriteRunnable != null) {
+                    //从系统队列删除一个任务
                     postWriteRunnable.run();
                 }
             }
@@ -754,6 +763,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
             boolean needsWrite = false;
 
             // Only need to write if the disk state is older than this commit
+            //如果磁盘的状态比提交的老则修改
             if (mDiskStateGeneration < mcr.memoryStateGeneration) {
                 if (isFromSyncCommit) {
                     needsWrite = true;

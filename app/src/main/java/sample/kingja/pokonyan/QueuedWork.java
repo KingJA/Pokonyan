@@ -220,11 +220,10 @@ public class QueuedWork {
     @UnsupportedAppUsage
     public static void queue(Runnable work, boolean shouldDelay) {
         Handler handler = getHandler();
-
         synchronized (sLock) {
             sWork.add(work);
-
             if (shouldDelay && sCanDelay) {
+                //异步
                 handler.sendEmptyMessageDelayed(QueuedWorkHandler.MSG_RUN, DELAY);
             } else {
                 handler.sendEmptyMessage(QueuedWorkHandler.MSG_RUN);
