@@ -122,17 +122,19 @@ final class SharedPreferencesImpl implements SharedPreferences {
         mLoaded = false;
         mMap = null;
         mThrowable = null;
-        //把xml文件解析到内存中
+        //解析xml文件并加载到内存中
         startLoadFromDisk();
     }
 
     @UnsupportedAppUsage
     private void startLoadFromDisk() {
+        //设置mLoad为false表示，xml文件还没加载
         synchronized (mLock) {
             mLoaded = false;
         }
         new Thread("SharedPreferencesImpl-load") {
             public void run() {
+                //从磁盘加载到内存 .xml->Map
                 loadFromDisk();
             }
         }.start();
@@ -140,7 +142,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
 
     private void loadFromDisk() {
         synchronized (mLock) {
-            //如果已经加载好了就跳出
+            //如果已经加载好了就跳出避免重复加载
             if (mLoaded) {
                 return;
             }
@@ -150,12 +152,10 @@ final class SharedPreferencesImpl implements SharedPreferences {
                 mBackupFile.renameTo(mFile);
             }
         }
-
         // Debugging
         if (mFile.exists() && !mFile.canRead()) {
             Log.w(TAG, "Attempt to read preferences file " + mFile + " without permission");
         }
-
         Map<String, Object> map = null;
         StructStat stat = null;
         Throwable thrown = null;
@@ -185,13 +185,10 @@ final class SharedPreferencesImpl implements SharedPreferences {
             //标示设为已经加载
             mLoaded = true;
             mThrowable = thrown;
-
-            // It's important that we always signal waiters, even if we'll make
-            // them fail with an exception. The try-finally is pretty wide, but
-            // better safe than sorry.
             try {
                 if (thrown == null) {
                     if (map != null) {
+                        //把解析得到的map赋值给全局mMap
                         mMap = map;
                         mStatTimestamp = stat.st_mtim;
                         mStatSize = stat.st_size;
@@ -199,9 +196,8 @@ final class SharedPreferencesImpl implements SharedPreferences {
                         mMap = new HashMap<>();
                     }
                 }
-                // In case of a thrown exception, we retain the old map. That allows
-                // any open editors to commit and store updates.
             } catch (Throwable t) {
+                //把异常设为全局异常，则其它方法调用的时候可以做相应处理
                 mThrowable = t;
             } finally {
                 mLock.notifyAll();
@@ -360,18 +356,10 @@ final class SharedPreferencesImpl implements SharedPreferences {
 
     @Override
     public Editor edit() {
-        // TODO: remove the need to call awaitLoadedLocked() when
-        // requesting an editor.  will require some work on the
-        // Editor, but then we should be able to do:
-        //
-        //      context.getSharedPreferences(..).edit().putString(..).apply()
-        //
-        // ... all without blocking.
         synchronized (mLock) {
-        //  如果执行 edit() 时如果 SharedPreferencesImpl 没有加载完成，就会阻塞
+            //  如果执行 edit() 时如果 SharedPreferencesImpl 没有加载完成，就会阻塞
             awaitLoadedLocked();
         }
-
         return new EditorImpl();
     }
 
@@ -417,7 +405,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
         @Override
         public Editor putString(String key, @Nullable String value) {
             synchronized (mEditorLock) {
-//                创建一个Map<String, Object> mModified来保存不同类型的数据
+                //创建一个Map<String, Object> mModified来保存不同类型的数据
                 mModified.put(key, value);
                 return this;
             }
@@ -530,22 +518,23 @@ final class SharedPreferencesImpl implements SharedPreferences {
             List<String> keysModified = null;
             Set<OnSharedPreferenceChangeListener> listeners = null;
             Map<String, Object> mapToWriteToDisk;
-
             synchronized (SharedPreferencesImpl.this.mLock) {
-                // We optimistically don't make a deep copy until
-                // a memory commit comes in when we're already
-                // writing to disk.
+                // We optimistically don't make a deep copy until a memory commit comes in when we're already writing
+                // to disk.
+                //我们不会做一个深拷贝，直到内存提交，我们准备写到磁盘上
                 if (mDiskWritesInFlight > 0) {
                     // We can't modify our mMap as a currently
-                    // in-flight write owns it.  Clone it before
-                    // modifying it.
+                    //我们不能马上修改mMap
+                    // in-flight write owns it.  Clone it before modifying it.
                     // noinspection unchecked
+                    //不能直接对mMap进行修改
                     mMap = new HashMap<String, Object>(mMap);
                 }
                 //内存里的map形式的sp
                 mapToWriteToDisk = mMap;
                 mDiskWritesInFlight++;
 
+                //sp修改监听器
                 boolean hasListeners = mListeners.size() > 0;
                 if (hasListeners) {
                     keysModified = new ArrayList<String>();
@@ -555,7 +544,7 @@ final class SharedPreferencesImpl implements SharedPreferences {
 
                 synchronized (mEditorLock) {
                     boolean changesMade = false;
-
+                    //清空mMap
                     if (mClear) {
                         if (!mapToWriteToDisk.isEmpty()) {
                             changesMade = true;
@@ -563,21 +552,20 @@ final class SharedPreferencesImpl implements SharedPreferences {
                         }
                         mClear = false;
                     }
-
                     for (Map.Entry<String, Object> e : mModified.entrySet()) {
                         String k = e.getKey();
                         Object v = e.getValue();
-                        // "this" is the magic value for a removal mutation. In addition,
-                        // setting a value to "null" for a given key is specified to be
-                        // equivalent to calling remove on that key.
+                        //当值是sp(remove时传值为sp)或者null时执行删除
                         if (v == this || v == null) {
+                            //如果原数据里没有改Key则不操作
                             if (!mapToWriteToDisk.containsKey(k)) {
                                 continue;
                             }
-                            // 如果执行了remove，则v对应的this，将这些key/value从mMap移除
+                            // 删除
                             mapToWriteToDisk.remove(k);
                         } else {
                             if (mapToWriteToDisk.containsKey(k)) {
+                                //原数据里包含有修改过Map的Key
                                 Object existingValue = mapToWriteToDisk.get(k);
                                 if (existingValue != null && existingValue.equals(v)) {
                                     //如果sp里的值没变化则不作保存
@@ -587,21 +575,18 @@ final class SharedPreferencesImpl implements SharedPreferences {
                             //将修改过的键值对保存在内存里
                             mapToWriteToDisk.put(k, v);
                         }
-
                         changesMade = true;
                         if (hasListeners) {
                             //被修改的键池
                             keysModified.add(k);
                         }
                     }
-
                     //全部保存在内存后清空修改过的Map
                     mModified.clear();
-
                     if (changesMade) {
+                        //内存提交记录+1
                         mCurrentMemoryStateGeneration++;
                     }
-
                     memoryStateGeneration = mCurrentMemoryStateGeneration;
                 }
             }
@@ -612,13 +597,12 @@ final class SharedPreferencesImpl implements SharedPreferences {
         @Override
         public boolean commit() {
             long startTime = 0;
-
             if (DEBUG) {
                 startTime = System.currentTimeMillis();
             }
-
+            //保存到内存
             MemoryCommitResult mcr = commitToMemory();
-
+            //同步保存到磁盘
             SharedPreferencesImpl.this.enqueueDiskWrite(
                     mcr, null /* sync write on this thread okay */);
             try {
